@@ -1,7 +1,7 @@
 namespace MinLib.Test
 {
     [TestClass]
-    public class UnitTest1
+    public class DummyTest
     {
         [TestMethod]
         public void TestMethod1()

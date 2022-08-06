@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 
 namespace MinLib.Utility;
 
-public static class AsyncUtils
+public static class AsyncUtility
 {
     // reference: https://devblogs.microsoft.com/pfxteam/implementing-a-simple-foreachasync-part-2/
     public static Task ForEachAsync<T>(this IEnumerable<T> source, Func<T, Task> func)

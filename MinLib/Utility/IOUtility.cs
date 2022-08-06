@@ -3,7 +3,7 @@ using MinLib.Extension;
 
 namespace MinLib.Utility;
 
-public static class IOUtils
+public static class IOUtility
 {
     #region Paths
 
