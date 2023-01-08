@@ -1,48 +1,78 @@
 using System.Collections.Concurrent;
 
-namespace MinLib.Utility;
+namespace MinLib.Extension;
 
-public static class AsyncUtility
+public static class AsyncExtension
 {
     // reference: https://devblogs.microsoft.com/pfxteam/implementing-a-simple-foreachasync-part-2/
-    public static Task ForEachAsync<T>(this IEnumerable<T> source, Func<T, Task> func)
+    public static Task ForEachAsync<TSource>(this IEnumerable<TSource> source, Func<TSource, Task> func)
     {
+        var exceptions = new ConcurrentBag<Exception>();
+
+        void ObserveException(Task task)
+        {
+            if (task.Exception != null)
+                exceptions.Add(task.Exception);
+        }
+
+        void RaiseExceptions(Task _)
+        {
+            if (exceptions.Any())
+                throw (exceptions.Count == 1 ? exceptions.Single() : new AggregateException(exceptions).Flatten());
+        }
+
         return Task.WhenAll(
             from item in source
-            select Task.Run(() => func(item)));
+            select Task.Run(async () =>
+            {
+                await func(item)
+                    .ContinueWith(ObserveException);
+            }))
+        .ContinueWith(ObserveException)
+        .ContinueWith(RaiseExceptions);
     }
 
-    public static Task ForEachAsync<T, K>(this IEnumerable<T> source, Func<T, K, Task> func, K args)
+    public static Task ForEachAsync<TSource>(this IEnumerable<TSource> source, int partitionCount, Func<TSource, Task> func)
     {
-        return Task.WhenAll(
-            from item in source
-            select Task.Run(() => func(item, args)));
-    }
+        var exceptions = new ConcurrentBag<Exception>();
 
-    public static Task ForEachAsync<T>(this IEnumerable<T> source, int partitionCount, Func<T, Task> func)
-    {
+        void ObserveException(Task task)
+        {
+            if (task.Exception != null)
+                exceptions.Add(task.Exception);
+        }
+
+        void RaiseExceptions(Task _)
+        {
+            if (exceptions.Any())
+                throw (exceptions.Count == 1 ? exceptions.Single() : new AggregateException(exceptions).Flatten());
+        }
+
         return Task.WhenAll(
             from partition in Partitioner.Create(source).GetPartitions(partitionCount)
-            select Task.Run(async delegate
+            select Task.Run(async () =>
             {
                 using (partition)
                     while (partition.MoveNext())
-                        await func(partition.Current);
-            }));
+                        await func(partition.Current)
+                            .ContinueWith(ObserveException);
+            }))
+        .ContinueWith(ObserveException)
+        .ContinueWith(RaiseExceptions);
     }
 
-    public static async Task<T?[]> WhenAll<T>(IEnumerable<Task<T?>> tasks, int workers) where T : class
+    public static async Task<T?[]> WhenAll<T>(this IEnumerable<Task<T>> tasks, int workers)
     {
         if (tasks is ICollection<Task<T>>)
         {
             throw new ArgumentException("The enumerable should not be materialized.", nameof(tasks));
         }
 
-        object? locker = new object();
-        List<T?>? results = new List<T?>();
+        object locker = new();
+        List<T?> results = new();
         bool failed = false;
 
-        using (IEnumerator<Task<T?>>? enumerator = tasks.GetEnumerator())
+        using (IEnumerator<Task<T>> enumerator = tasks.GetEnumerator())
         {
             Task[]? workerTasks = Enumerable
             .Range(0, workers)
@@ -52,7 +82,7 @@ public static class AsyncUtility
                 {
                     while (true)
                     {
-                        Task<T?> task;
+                        Task<T> task;
                         int index;
                         lock (locker)
                         {
@@ -80,14 +110,14 @@ public static class AsyncUtility
         lock (locker) return results.ToArray();
     }
 
-    public static async Task WhenAll(IEnumerable<Task> tasks, int workers)
+    public static async Task WhenAll(this IEnumerable<Task> tasks, int workers)
     {
         if (tasks is ICollection<Task>)
         {
             throw new ArgumentException("The enumerable should not be materialized.", nameof(tasks));
         }
 
-        object? locker = new object();
+        object locker = new();
         bool failed = false;
 
         using (IEnumerator<Task>? enumerator = tasks.GetEnumerator())
